@@ -1,0 +1,69 @@
+- name: InstallMinikube 
+  hosts: localhost
+  become: true
+  gather_facts: false
+  tasks:
+    - name: Update package repositories
+      package:
+        name: '*'
+        state: latest
+        update_cache: yes      
+
+    - name: Install dependencies
+      package:
+        name:
+          - docker.io
+          - curl
+        state: present
+
+    - name: Add user to 'docker' group
+      become: true
+      user:
+        name: ubuntu
+        groups: docker
+        append: true
+
+    - name: Install kubectl and Minikube
+      shell: |
+        curl -LO "https://dl.k8s.io/release/$(curl -L -s https://dl.k8s.io/release/stable.txt)/bin/linux/amd64/kubectl" \
+        && chmod +x kubectl && mv kubectl /usr/local/bin/ \
+        && curl -LO https://storage.googleapis.com/minikube/releases/latest/minikube-linux-amd64 \
+        && install minikube-linux-amd64 /usr/local/bin/minikube
+
+    - name: Start Docker and Minikube
+      become_user: ubuntu
+      shell: |
+        sudo systemctl start docker \
+        && sudo systemctl enable docker \
+        && minikube start --driver=docker
+
+    - name: Retrieve Minikube IP
+      become_user: ubuntu
+      command: minikube ip
+      register: minikube_ip
+
+    - name: Update /etc/hosts with Minikube IP
+      lineinfile:
+        path: /etc/hosts
+        line: "{{ minikube_ip.stdout }} nexus.local.com"
+        state: present
+
+    - name: Update /etc/hosts with app
+      lineinfile:
+        path: /etc/hosts
+        line: "{{ minikube_ip.stdout }} app.local.com"
+        state: present    
+
+    - name: Update /etc/hosts with Minikube IP (docker.nexus.local.com)
+      lineinfile:
+        path: /etc/hosts
+        line: "{{ minikube_ip.stdout }} docker.nexus.local.com"
+        state: present
+
+    - name: Append entries to Minikube config
+      become_user: ubuntu
+      lineinfile:
+        path: ~/.minikube/machines/minikube/config.json
+        regexp: '"InsecureRegistry": \['
+        line: '        "InsecureRegistry": [ "nexus-service.tools.svc.cluster.local", "docker.nexus.local.com",'
+      backrefs: yes
